@@ -10,8 +10,19 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 if (canvas && stage && !reducedMotion) {
   try {
-    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: 'high-performance' });
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 1.6));
+    const constrainedDevice = (navigator.deviceMemory && navigator.deviceMemory <= 4) ||
+      (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
+    let qualityScale = constrainedDevice ? 0.82 : 1;
+    let qualityReduced = constrainedDevice;
+    let performanceSampled = false;
+
+    const renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: !constrainedDevice,
+      alpha: false,
+      powerPreference: 'high-performance'
+    });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, constrainedDevice ? 1 : 1.25) * qualityScale);
     renderer.setSize(innerWidth, innerHeight);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -41,9 +52,9 @@ if (canvas && stage && !reducedMotion) {
       roughness: 0.035,
       metalness: 0,
       ior: 1.48,
-      thickness: 1.75,
+      thickness: 1.1,
       attenuationColor: new THREE.Color(0x6040ff),
-      attenuationDistance: 3.8,
+      attenuationDistance: 8.2,
       dispersion: 0.68,
       iridescence: 0.28,
       iridescenceIOR: 1.32,
@@ -54,7 +65,7 @@ if (canvas && stage && !reducedMotion) {
       side: THREE.FrontSide
     });
 
-    const orb = new THREE.Mesh(new THREE.SphereGeometry(1.62, 128, 96), glassMaterial);
+    const orb = new THREE.Mesh(new THREE.SphereGeometry(1.62, 96, 64), glassMaterial);
     orbGroup.add(orb);
 
     const innerMaterial = new THREE.MeshPhysicalMaterial({
@@ -75,16 +86,10 @@ if (canvas && stage && !reducedMotion) {
     inner.scale.set(1, 0.9, 1.05);
     orbGroup.add(inner);
 
-    const rim = new THREE.Mesh(
-      new THREE.SphereGeometry(1.66, 96, 64),
-      new THREE.MeshBasicMaterial({ color: 0x76ddff, wireframe: true, transparent: true, opacity: 0.025, blending: THREE.AdditiveBlending, depthWrite: false })
-    );
-    orbGroup.add(rim);
-
     const particleCount = 1500;
     const positions = new Float32Array(particleCount * 3);
     const colors = new Float32Array(particleCount * 3);
-    const palette = [new THREE.Color(0x56d9ff), new THREE.Color(0xa16bff), new THREE.Color(0xff70bd), new THREE.Color(0xffffff)];
+    const palette = [0x56d9ff, 0xa16bff, 0xff70bd, 0xffffff].map(value => new THREE.Color(value));
     for (let i = 0; i < particleCount; i++) {
       const radius = 2.25 + Math.pow(Math.random(), 0.7) * 5.4;
       const angle = Math.random() * Math.PI * 2;
@@ -92,26 +97,45 @@ if (canvas && stage && !reducedMotion) {
       positions[i * 3] = Math.cos(angle) * radius;
       positions[i * 3 + 1] = band * radius * 0.34;
       positions[i * 3 + 2] = Math.sin(angle) * radius * 0.58;
-      const c = palette[Math.floor(Math.random() * palette.length)];
-      colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
+      const color = palette[Math.floor(Math.random() * palette.length)];
+      colors[i * 3] = color.r;
+      colors[i * 3 + 1] = color.g;
+      colors[i * 3 + 2] = color.b;
     }
     const particleGeometry = new THREE.BufferGeometry();
     particleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     particleGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     const particles = new THREE.Points(particleGeometry, new THREE.PointsMaterial({
-      size: 0.027, vertexColors: true, transparent: true, opacity: 0.85,
-      depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true
+      size: 0.027,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.85,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      sizeAttenuation: true
     }));
     scene.add(particles);
 
-    const cyan = new THREE.PointLight(0x4cdcff, 48, 18, 2); cyan.position.set(-4, 2.6, 4.5); scene.add(cyan);
-    const pink = new THREE.PointLight(0xff4fa8, 44, 18, 2); pink.position.set(4, -2.4, 3); scene.add(pink);
-    const violet = new THREE.PointLight(0x784cff, 32, 16, 2); violet.position.set(0, 3.8, -2); scene.add(violet);
+    const cyan = new THREE.PointLight(0x4cdcff, 48, 18, 2);
+    cyan.position.set(-4, 2.6, 4.5);
+    scene.add(cyan);
+    const pink = new THREE.PointLight(0xff4fa8, 44, 18, 2);
+    pink.position.set(4, -2.4, 3);
+    scene.add(pink);
+    const violet = new THREE.PointLight(0x784cff, 32, 16, 2);
+    violet.position.set(0, 3.8, -2);
+    scene.add(violet);
     scene.add(new THREE.AmbientLight(0x252055, 1.8));
 
     const composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
-    const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.72, 0.68, 0.86);
+    const bloom = new UnrealBloomPass(
+      new THREE.Vector2(innerWidth, innerHeight),
+      constrainedDevice ? 0.48 : 0.68,
+      0.62,
+      0.88
+    );
+    let bloomEnabled = true;
     composer.addPass(bloom);
 
     const cameraPath = new THREE.CatmullRomCurve3([
@@ -137,9 +161,15 @@ if (canvas && stage && !reducedMotion) {
     let pointerY = 0;
     let running = true;
     let firstFrame = true;
+    let sampledFrames = 0;
+    let sampledTime = 0;
 
     function updateProgress() {
-      targetProgress = THREE.MathUtils.clamp(scrollY / Math.max(1, document.documentElement.scrollHeight - innerHeight), 0, 1);
+      targetProgress = THREE.MathUtils.clamp(
+        scrollY / Math.max(1, document.documentElement.scrollHeight - innerHeight),
+        0,
+        1
+      );
     }
     updateProgress();
     addEventListener('scroll', updateProgress, { passive: true });
@@ -153,12 +183,19 @@ if (canvas && stage && !reducedMotion) {
     function render() {
       requestAnimationFrame(render);
       if (!running) return;
-      const delta = Math.min(clock.getDelta(), 0.05);
+
+      const rawDelta = clock.getDelta();
+      const delta = Math.min(rawDelta, 0.05);
       const elapsed = clock.elapsedTime;
       easedProgress = THREE.MathUtils.damp(easedProgress, targetProgress, 3.2, delta);
       const pathT = THREE.MathUtils.smoothstep(easedProgress, 0, 1);
-      const pos = cameraPath.getPoint(pathT);
-      camera.position.set(pos.x + pointerX, pos.y - pointerY, pos.z);
+
+      // Keep the orb clear of the hero copy, then bring it to centre as the journey begins.
+      const heroOffset = 1.35 * (1 - THREE.MathUtils.smoothstep(pathT, 0.02, 0.28));
+      orbGroup.position.x = heroOffset;
+
+      const position = cameraPath.getPoint(pathT);
+      camera.position.set(position.x + pointerX, position.y - pointerY, position.z);
       const lookT = THREE.MathUtils.clamp((pathT - 0.52) / 0.48, 0, 1);
       camera.lookAt(lookPath.getPoint(lookT));
 
@@ -169,7 +206,28 @@ if (canvas && stage && !reducedMotion) {
       particles.rotation.y = -elapsed * 0.018 + pathT * 0.45;
       particles.rotation.z = Math.sin(elapsed * 0.08) * 0.035;
       glassMaterial.dispersion = 0.56 + Math.sin(elapsed * 0.35) * 0.08;
-      bloom.strength = 0.68 + Math.sin(elapsed * 0.42) * 0.08;
+      if (bloomEnabled) {
+        bloom.strength = (constrainedDevice ? 0.48 : 0.68) + Math.sin(elapsed * 0.42) * 0.06;
+      }
+
+      sampledFrames += 1;
+      sampledTime += rawDelta;
+      if (!performanceSampled && sampledFrames >= 120) {
+        const sampledFps = sampledFrames / Math.max(sampledTime, 0.001);
+        performanceSampled = true;
+        if (sampledFps < 45) {
+          qualityReduced = true;
+          qualityScale = 0.72;
+          renderer.setPixelRatio(Math.min(devicePixelRatio, 1) * qualityScale);
+          composer.setPixelRatio(Math.min(devicePixelRatio, 1) * qualityScale);
+          if (sampledFps < 32 && bloomEnabled) {
+            composer.removePass(bloom);
+            bloomEnabled = false;
+          }
+        }
+        sampledFrames = 0;
+        sampledTime = 0;
+      }
 
       composer.render();
       if (firstFrame) {
@@ -184,7 +242,9 @@ if (canvas && stage && !reducedMotion) {
       camera.updateProjectionMatrix();
       renderer.setSize(innerWidth, innerHeight);
       composer.setSize(innerWidth, innerHeight);
-      renderer.setPixelRatio(Math.min(devicePixelRatio, 1.6));
+      const dprCap = constrainedDevice || qualityReduced ? 1 : 1.25;
+      renderer.setPixelRatio(Math.min(devicePixelRatio, dprCap) * qualityScale);
+      composer.setPixelRatio(Math.min(devicePixelRatio, dprCap) * qualityScale);
     });
   } catch (error) {
     console.error('WebGL experience unavailable:', error);
